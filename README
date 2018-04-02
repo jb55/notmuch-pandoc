@@ -1,0 +1,15 @@
+
+notmuch-pandoc
+==============
+
+Generate pandoc documents from notmuch threads.
+
+Currently spits out epub files, eventually will be able to generate any pandoc
+document.
+
+Example
+-------
+
+  $ notmuch show --format=json thread:0000000000043bd0 | ./notmuch-epub
+
+
