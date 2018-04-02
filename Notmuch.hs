@@ -7,20 +7,23 @@ import Control.Monad.IO.Class (MonadIO(..))
 import Data.Aeson
 import Data.Aeson.Lens
 import Data.Default (def)
-import Data.List (length, intersperse)
+import Data.List (length, intercalate)
 import Data.Maybe (fromMaybe)
 import Data.Monoid ((<>))
 import Data.Text (Text)
-import System.IO (IOMode(..), withFile)
+import System.IO (Handle, stdin, stderr, hPutStrLn)
 import Text.Pandoc (Pandoc(..))
+import Data.Text.ICU.Replace (replaceAll)
 import Text.Pandoc.Class (PandocMonad, runIO)
 import Text.Pandoc.Definition
 import Text.Pandoc.Lens
+import Text.Pandoc.Options
 import Text.Pandoc.Readers
-import Text.Pandoc.Writers (writeMarkdown)
+import Text.Pandoc.Writers (writeEPUB3)
 
 import qualified Data.ByteString.Lazy as BS
 import qualified Data.Text.IO as T
+import qualified Data.Text as T
 import qualified Data.Aeson as A
 import qualified Data.HashMap.Lazy as Map
 
@@ -35,25 +38,23 @@ data Message =
 
 main :: IO ()
 main = do
-  v <- thread "/tmp/optimized-header-sync.json"
+  v <- thread stdin
   let msgs  = messages v
-      outfile = "/tmp/out.md"
       mdocs = do docs <- mapM renderMessage msgs
-                 let seps = concat $ intersperse [HorizontalRule] docs
-                 writeMarkdown def (Pandoc nullMeta seps)
+                 let seps = intercalate [HorizontalRule] docs
+                 writeEPUB3 def (Pandoc nullMeta seps)
   edocs <- runIO mdocs
   case edocs of
     Left err   -> print err
     Right md -> do
-      putStrLn ("writing " ++ outfile)
-      T.writeFile outfile md
+      hPutStrLn stderr "writing out.epub"
+      BS.writeFile "out.epub" md
 
 
-thread :: FilePath -> IO Value
-thread file = do
-  withFile file ReadMode $ \handle -> do
-    txt <- BS.hGetContents handle
-    maybe (fail "could not decode") return (decode txt)
+thread :: Handle -> IO Value
+thread handle = do
+  txt <- BS.hGetContents handle
+  maybe (fail "could not decode") return (decode txt)
 
 
 hasKeyWith :: Text -> (Value -> Bool) -> Value -> Bool
@@ -85,27 +86,17 @@ parseMessage msg =
     , msgBody = fromMaybe "" body_
     }
 
+fixup :: Text -> Text
+fixup = replaceAll "^\\s*>" "    "
+
 renderMessage :: (MonadIO m, PandocMonad m) => Message -> m [Block]
 renderMessage Message{..} =
   let
-    msg = "From: "<> msgFrom <> "\r\n" <>
-          "To: " <> msgTo <> "\r\n\r\n" <>
-          msgBody
-    trunc n len = '[' : show (len - n) ++ " lines truncated]"
-    rewriter bs =
-      let
-        len = length bs
-        n   = 15
-      in
-        if len > n
-          then take n bs ++ [ Para [ Str (trunc n len) ] ]
-          else bs
+    opts = def { readerExtensions = getDefaultExtensions "markdown_github" }
+    nl = "\r\n\r\n"
+    msg = "**From** "<> msgFrom <> nl <>
+          "**To** " <> msgTo <> nl <>
+          fixup msgBody <> nl
   in
-    do doc@(Pandoc meta_ blocks) <- readMarkdown def msg
-       let bs = transformOf (plate . traverse . _BlockQuote) rewriter blocks
-           newDoc = Pandoc meta_ bs
-           native = A.encode doc
-           nativeF = A.encode newDoc
-       liftIO $ BS.writeFile "/tmp/native.json" native
-       liftIO $ BS.writeFile "/tmp/native-filtered.json" nativeF
-       return bs
+    do doc@(Pandoc meta_ blocks) <- readMarkdown opts msg
+       return blocks

@@ -1,3 +1,3 @@
 
-notmuch-epub: Notmuch.hs
-	ghc --make $< -o $@
+notmuch-epub: Notmuch.hs Makefile
+	ghc -O --make $< -o $@

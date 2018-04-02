@@ -1,0 +1,4 @@
+*.o
+*.hi
+/notmuch-epub
+/out.epub
